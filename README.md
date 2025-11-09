@@ -111,10 +111,10 @@ cd ai-setup-scripts/ansible
 ansible-playbook verify-setup.yml
 ```
 
-Or test Docker integration (after Ansible creates the test script):
+Or run comprehensive Docker and CUDA testing:
 ```bash
 cd ai-setup-scripts
-./tests/test-cuda-docker.sh
+./ansible/tests/test-cuda-docker.sh
 ```
 
 ## Ansible Playbook Features
@@ -286,7 +286,7 @@ ai-setup-scripts/
 ├── templates/                      # Docker Compose templates (auto-generated)
 │   └── docker-compose.ai-template.yml
 └── tests/                          # Test scripts (auto-generated)
-    └── test-cuda-docker.sh
+    └── test-cuda-docker.sh         # Comprehensive Docker & CUDA testing
 ```
 
 ### Created Workspace Structure
