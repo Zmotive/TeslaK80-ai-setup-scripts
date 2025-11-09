@@ -281,6 +281,26 @@ cd ansible/
 ansible-playbook setup-ai-system.yml --check --diff
 ```
 
+## 💾 **Future-Proofing & Dependency Management**
+
+Tesla K80 uses legacy packages (NVIDIA Driver 470.x, CUDA 11.7) that may be removed from repositories in 1-2 years.
+
+### Create Standalone Backup Repository
+```bash
+# Create separate backup repository
+./create-backup-repo.sh
+
+# This creates: ~/TeslaK80-dependency-backups/
+```
+
+### Backup Repository Contents
+- **APT Packages**: nvidia-driver-470, cuda-toolkit-11-7, docker-ce, nvidia-container-toolkit
+- **Docker Images**: Tesla K80 compatible CUDA, PyTorch, TensorFlow images  
+- **Repository Keys**: NVIDIA CUDA, Docker, NVIDIA Container Toolkit GPG keys
+- **Offline Installer**: Complete restoration scripts
+
+**Recommended**: Create private GitHub repository for your backups (contains proprietary packages).
+
 ## File Structure
 
 ### Installation Scripts
@@ -294,7 +314,8 @@ ai-setup-scripts/
 │   ├── ansible.cfg                 # Ansible configuration
 │   └── README.md                   # Ansible documentation
 ├── quick-install.sh                # One-command installer
-├── setup.log                       # Installation log (from previous runs)
+├── create-backup-repo.sh          # Create standalone backup repository
+├── verify-system.sh               # System verification script  
 ├── .gitignore                      # Git ignore file
 └── README.md                       # This file
 
