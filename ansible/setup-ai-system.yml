@@ -159,40 +159,22 @@
     # WORKSPACE DIRECTORY CREATION
     # ===============================================
     
-    - name: Get actual user home directory
-      shell: "echo ~{{ ansible_user_id }}"
-      register: actual_home_dir
-      become: no
-      tags: [workspace]
-
     - name: Create AI workspace directories
       file:
-        path: "{{ actual_home_dir.stdout }}/{{ item }}"
+        path: "{{ home_dir }}/{{ item }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user_id }}"
-        group: "{{ ansible_user_id }}"
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
       loop:
-        - DockerVolumes
-        - DockerVolumes/pytorch
-        - DockerVolumes/tensorflow
-        - DockerVolumes/jupyter
-        - DockerVolumes/shared
-        - DockerVolumes/tensorboard
-        - DockerVolumes/datasets
-        - DockerVolumes/checkpoints
-        - DockerVolumes/logs
-        - Models
-        - Models/pytorch
-        - Models/tensorflow
-        - Models/onnx
-        - Models/huggingface
-        - Projects
-        - Projects/ai-experiments
-        - Projects/training
-        - Projects/inference
-        - venvs
-      become: no
+        - ai-workspace
+        - ai-workspace/pytorch
+        - ai-workspace/tensorflow
+        - ai-workspace/jupyter
+        - ai-workspace/shared
+        - ai-workspace/datasets
+        - ai-workspace/models
+        - ai-workspace/projects
       tags: [workspace]
 
     # ===============================================
