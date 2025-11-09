@@ -82,12 +82,12 @@ This project uses **Ansible** for infrastructure as code, providing several key 
 ### Option 1: One-Command Install (Recommended)
 ```bash
 # Download and run the quick installer
-curl -fsSL https://raw.githubusercontent.com/yourusername/ai-setup-scripts/main/quick-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Zmotive/TeslaK80-ai-setup-scripts/main/quick-install.sh | bash
 ```
 
 ### Option 2: Manual Clone and Install
 ```bash
-git clone https://github.com/yourusername/ai-setup-scripts.git ai-setup-scripts
+git clone https://github.com/Zmotive/TeslaK80-ai-setup-scripts.git ai-setup-scripts
 cd ai-setup-scripts/ansible
 ./bootstrap.sh
 ```

@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-REPO_URL="https://github.com/yourusername/ai-setup-scripts.git"
+REPO_URL="https://github.com/Zmotive/TeslaK80-ai-setup-scripts.git"
 TARGET_DIR="$HOME/ai-setup-scripts"
 
 log() {
