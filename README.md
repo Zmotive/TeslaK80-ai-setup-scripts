@@ -5,10 +5,11 @@ Complete installation scripts for setting up a minimal Ubuntu 22.04 LTS system o
 ## ✅ **Tesla K80 Status: FULLY FUNCTIONAL**
 - **NVIDIA Driver 470**: ✅ Installed and working
 - **Dual GPU Detection**: ✅ Both Tesla K80 units detected (24GB total)  
-- **CUDA 11.4 Support**: ✅ Compatible containers running
-- **PyTorch**: ✅ GPU acceleration verified
-- **TensorFlow**: ✅ GPU acceleration verified
+- **CUDA 11.7 Support**: ✅ Compatible containers running
+- **PyTorch**: ✅ GPU acceleration verified (Tesla K80 compatible images)
+- **TensorFlow**: ✅ GPU acceleration verified (Tesla K80 compatible images)
 - **Docker Integration**: ✅ NVIDIA Container Toolkit configured
+- **Docker Compose Templates**: ✅ Modern GPU resource allocation syntax
 
 ## System Requirements
 
@@ -117,6 +118,14 @@ cd ai-setup-scripts
 ./ansible/tests/test-cuda-docker.sh
 ```
 
+### 🧪 **Comprehensive Testing Features**
+The test suite validates your entire Tesla K80 AI environment:
+- **Basic CUDA functionality** - Direct GPU access testing
+- **Docker Compose syntax** - Template validation
+- **Container GPU access** - Tesla K80 compatibility in containers
+- **Image availability** - All AI framework images verified
+- **Tesla K80 specific handling** - Accounts for driver 470.x behavior
+
 ## Ansible Playbook Features
 
 ### Run Complete Setup
@@ -192,9 +201,16 @@ The installation automatically creates an organized folder structure:
 ```bash
 cd ~/Projects
 # Copy the template created by Ansible
-cp ~/ai-setup-scripts/templates/docker-compose.ai-template.yml docker-compose.yml
-docker compose up -d pytorch-cuda
-docker compose exec pytorch-cuda bash
+cp ~/ai-setup-scripts/ansible/templates/docker-compose.ai-template.yml docker-compose.yml
+
+# Available services:
+docker compose up jupyter-pytorch -d      # PyTorch Jupyter Lab (port 8888)
+docker compose up jupyter-tensorflow -d   # TensorFlow Jupyter Lab (port 8889)
+docker compose up cuda-dev -d            # CUDA development environment (port 8080)
+docker compose up code-server -d         # VS Code in browser (port 8443)
+
+# Access containers:
+docker compose exec cuda-dev bash
 ```
 
 ### Test GPU in PyTorch
@@ -283,10 +299,11 @@ ai-setup-scripts/
 └── README.md                       # This file
 
 # Created by Ansible during installation:
-├── templates/                      # Docker Compose templates (auto-generated)
-│   └── docker-compose.ai-template.yml
-└── tests/                          # Test scripts (auto-generated)
-    └── test-cuda-docker.sh         # Comprehensive Docker & CUDA testing
+├── ansible/
+│   ├── templates/                  # Docker Compose templates (auto-generated)
+│   │   └── docker-compose.ai-template.yml
+│   └── tests/                      # Test scripts (auto-generated)
+│       └── test-cuda-docker.sh     # Comprehensive Docker & CUDA testing
 ```
 
 ### Created Workspace Structure
