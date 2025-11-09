@@ -1,0 +1,607 @@
+---
+# AI CUDA Docker Setup - Ansible Playbook
+# Complete setup for Ubuntu 22.04 LTS with Tesla K80 GPU, CUDA 12.2, and Docker
+# Optimized for NVIDIA Tesla K80 (compute capability 3.7)
+# Based on the original RX6700 setup but adapted for CUDA
+
+- name: Setup AI System with CUDA and Docker for Tesla K80
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    cuda_version: "11.8"
+    cuda_version_full: "11-8"
+    # user_name and home_dir will be provided via --extra-vars from bootstrap.sh
+    # Defaults for direct playbook execution:
+    user_name: "{{ user_name | default(ansible_user_id) }}"
+    home_dir: "{{ home_dir | default(ansible_user_dir) }}"
+    
+  tasks:
+    # ===============================================
+    # PREREQUISITES AND VALIDATION
+    # ===============================================
+    
+    - name: Check Ubuntu version
+      assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version == "22.04"
+        fail_msg: "This playbook requires Ubuntu 22.04 LTS"
+        success_msg: "Ubuntu 22.04 LTS confirmed"
+      tags: [prerequisites]
+
+    - name: Check for NVIDIA GPU
+      shell: lspci | grep -i nvidia | grep -i vga
+      register: nvidia_gpu_check
+      failed_when: false
+      changed_when: false
+      tags: [prerequisites]
+
+    - name: Display GPU information
+      debug:
+        msg: "NVIDIA GPU detected: {{ nvidia_gpu_check.stdout }}"
+      when: nvidia_gpu_check.rc == 0
+      tags: [prerequisites]
+
+    - name: Warn if no NVIDIA GPU detected
+      debug:
+        msg: "WARNING: No NVIDIA GPU detected. CUDA installation may not work properly."
+      when: nvidia_gpu_check.rc != 0
+      tags: [prerequisites]
+
+    - name: Test internet connectivity
+      uri:
+        url: https://google.com
+        method: HEAD
+        timeout: 5
+      tags: [prerequisites]
+
+    # ===============================================
+    # SYSTEM PREPARATION
+    # ===============================================
+    
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [system]
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      tags: [system]
+
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - wget
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - build-essential
+          - git
+          - vim
+          - htop
+          - tree
+          - unzip
+          - python3
+          - python3-pip
+          - python3-venv
+          - linux-headers-generic
+          - dkms
+        state: present
+      tags: [system]
+
+    - name: Remove old CUDA sources
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/cuda.list
+        - /etc/apt/keyrings/cuda.gpg
+        - /etc/apt/sources.list.d/nvidia-ml.list
+      tags: [cleanup]
+
+    - name: Stop old Docker services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - docker
+        - docker.socket
+        - containerd
+      failed_when: false
+      tags: [cleanup]
+
+    - name: Remove old Docker packages
+      apt:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - containerd
+          - runc
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+          - nvidia-docker2
+          - nvidia-container-runtime
+        state: absent
+      tags: [cleanup]
+
+    - name: Remove old Docker data directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/docker
+        - /etc/docker
+        - /var/lib/containerd
+      tags: [cleanup]
+
+    - name: Remove old CUDA installations
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/cuda
+        - /usr/local/cuda-*
+      tags: [cleanup]
+
+    # ===============================================
+    # WORKSPACE DIRECTORY CREATION
+    # ===============================================
+    
+    - name: Get actual user home directory
+      shell: "echo ~{{ ansible_user_id }}"
+      register: actual_home_dir
+      become: no
+      tags: [workspace]
+
+    - name: Create AI workspace directories
+      file:
+        path: "{{ actual_home_dir.stdout }}/{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+      loop:
+        - DockerVolumes
+        - DockerVolumes/pytorch
+        - DockerVolumes/tensorflow
+        - DockerVolumes/jupyter
+        - DockerVolumes/shared
+        - DockerVolumes/tensorboard
+        - DockerVolumes/datasets
+        - DockerVolumes/checkpoints
+        - DockerVolumes/logs
+        - Models
+        - Models/pytorch
+        - Models/tensorflow
+        - Models/onnx
+        - Models/huggingface
+        - Projects
+        - Projects/ai-experiments
+        - Projects/training
+        - Projects/inference
+        - venvs
+      become: no
+      tags: [workspace]
+
+    # ===============================================
+    # NVIDIA DRIVER INSTALLATION - TESLA K80 SPECIFIC
+    # ===============================================
+    
+    - name: Check if correct NVIDIA driver is installed
+      shell: nvidia-smi
+      register: nvidia_driver_check
+      failed_when: false
+      changed_when: false
+      tags: [nvidia]
+
+    - name: Remove incompatible NVIDIA drivers (580+)
+      apt:
+        name:
+          - nvidia-driver-580
+          - nvidia-dkms-580
+          - nvidia-utils-580
+          - nvidia-*-580
+        state: absent
+        purge: yes
+      tags: [nvidia]
+
+    - name: Add NVIDIA PPA for driver availability
+      apt_repository:
+        repo: ppa:graphics-drivers/ppa
+        state: present
+      tags: [nvidia]
+
+    - name: Update APT cache after adding NVIDIA PPA
+      apt:
+        update_cache: yes
+      tags: [nvidia]
+
+    - name: Install NVIDIA driver 470 (Tesla K80 compatible)
+      apt:
+        name:
+          - nvidia-driver-470
+          - nvidia-utils-470
+          - nvidia-settings
+        state: present
+      tags: [nvidia]
+
+    - name: Hold NVIDIA driver packages to prevent auto-upgrade
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - nvidia-driver-470
+        - nvidia-utils-470
+      tags: [nvidia]
+
+    - name: Blacklist nouveau driver
+      lineinfile:
+        path: /etc/modprobe.d/blacklist-nouveau.conf
+        line: "{{ item }}"
+        create: yes
+      loop:
+        - "blacklist nouveau"
+        - "options nouveau modeset=0"
+      tags: [nvidia]
+
+    - name: Update initramfs after driver installation
+      command: update-initramfs -u
+      tags: [nvidia]
+
+    # ===============================================
+    # CUDA INSTALLATION
+    # ===============================================
+    
+    - name: Create APT keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      tags: [cuda]
+
+    - name: Download CUDA keyring package
+      get_url:
+        url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb"
+        dest: /tmp/cuda-keyring_1.0-1_all.deb
+        mode: '0644'
+      tags: [cuda]
+
+    - name: Install CUDA keyring
+      apt:
+        deb: /tmp/cuda-keyring_1.0-1_all.deb
+        state: present
+      tags: [cuda]
+
+    - name: Update APT cache after adding CUDA repository
+      apt:
+        update_cache: yes
+      tags: [cuda]
+
+    - name: Remove incompatible CUDA 12.x packages
+      apt:
+        name:
+          - cuda-toolkit-12-2
+          - cuda-runtime-12-2
+          - cuda-*-12-2
+        state: absent
+        purge: yes
+      tags: [cuda]
+
+    - name: Install CUDA packages (Tesla K80 compatible - 11.8)
+      apt:
+        name:
+          - cuda-toolkit-11-8
+          - cuda-runtime-11-8
+          - libcudnn8
+          - libcudnn8-dev
+        state: present
+      tags: [cuda]
+
+    - name: Create CUDA symlink
+      file:
+        src: "/usr/local/cuda-{{ cuda_version }}"
+        dest: /usr/local/cuda
+        state: link
+        force: yes
+      tags: [cuda]
+
+    - name: Create CUDA environment script
+      copy:
+        content: |
+          #!/bin/bash
+          # CUDA Environment Setup
+          export CUDA_HOME=/usr/local/cuda
+          export PATH=$CUDA_HOME/bin:$PATH
+          export LD_LIBRARY_PATH=$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}
+          export CUDA_ROOT=$CUDA_HOME
+          export NVIDIA_VISIBLE_DEVICES=all
+          export NVIDIA_DRIVER_CAPABILITIES=compute,utility
+        dest: /etc/profile.d/cuda.sh
+        mode: '0755'
+      tags: [cuda]
+
+    # ===============================================
+    # DOCKER INSTALLATION
+    # ===============================================
+    
+    - name: Add Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /tmp/docker.gpg.key
+        mode: '0644'
+      tags: [docker]
+
+    - name: Import Docker GPG key
+      shell: gpg --dearmor < /tmp/docker.gpg.key > /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+      tags: [docker]
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        filename: docker
+        state: present
+      tags: [docker]
+
+    - name: Install Docker packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      tags: [docker]
+
+    # ===============================================
+    # NVIDIA CONTAINER TOOLKIT
+    # ===============================================
+    
+    - name: Add NVIDIA Container Toolkit repository
+      get_url:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        dest: /tmp/nvidia-container-toolkit.gpg.key
+        mode: '0644'
+      tags: [nvidia-docker]
+
+    - name: Import NVIDIA Container Toolkit GPG key
+      shell: gpg --dearmor < /tmp/nvidia-container-toolkit.gpg.key > /etc/apt/keyrings/nvidia-container-toolkit.gpg
+      args:
+        creates: /etc/apt/keyrings/nvidia-container-toolkit.gpg
+      tags: [nvidia-docker]
+
+    - name: Add NVIDIA Container Toolkit repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/ubuntu18.04/$(ARCH) /"
+        filename: nvidia-container-toolkit
+        state: present
+      tags: [nvidia-docker]
+
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+      tags: [nvidia-docker]
+
+    - name: Install NVIDIA Container Toolkit
+      apt:
+        name:
+          - nvidia-container-toolkit
+        state: present
+      tags: [nvidia-docker]
+
+    - name: Configure NVIDIA Container Runtime
+      shell: nvidia-ctk runtime configure --runtime=docker
+      tags: [nvidia-docker]
+
+    - name: Create Docker daemon configuration
+      copy:
+        content: |
+          {
+              "log-driver": "json-file",
+              "log-opts": {
+                  "max-size": "10m",
+                  "max-file": "3"
+              },
+              "storage-driver": "overlay2",
+              "runtimes": {
+                  "nvidia": {
+                      "path": "nvidia-container-runtime",
+                      "runtimeArgs": []
+                  }
+              },
+              "default-runtime": "nvidia",
+              "default-ulimits": {
+                  "memlock": {
+                      "Hard": -1,
+                      "Name": "memlock",
+                      "Soft": -1
+                  },
+                  "stack": {
+                      "Hard": 67108864,
+                      "Name": "stack",
+                      "Soft": 67108864
+                  }
+              }
+          }
+        dest: /etc/docker/daemon.json
+        mode: '0644'
+      notify: restart docker
+      tags: [docker]
+
+    - name: Enable and start Docker services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - docker
+        - containerd
+      tags: [docker]
+
+    # ===============================================
+    # USER PERMISSIONS
+    # ===============================================
+    
+    - name: Add user to docker group
+      user:
+        name: "{{ user_name }}"
+        groups: docker
+        append: yes
+      tags: [permissions]
+
+    # ===============================================
+    # TEMPLATE AND TEST FILES
+    # ===============================================
+    
+    - name: Get current working directory
+      shell: pwd
+      register: current_pwd
+      become: no
+      tags: [templates]
+
+    - name: Create templates directory
+      file:
+        path: "{{ current_pwd.stdout }}/templates"
+        state: directory
+        mode: '0755'
+      become: no
+      tags: [templates]
+
+    - name: Create tests directory
+      file:
+        path: "{{ current_pwd.stdout }}/tests"
+        state: directory
+        mode: '0755'
+      become: no
+      tags: [templates]
+
+    - name: Create Docker Compose template
+      copy:
+        content: |
+          version: '3.8'
+
+          services:
+            jupyter-pytorch:
+              image: pytorch/pytorch:1.12.1-cuda11.3-cudnn8-runtime
+              container_name: ai-jupyter-pytorch
+              restart: unless-stopped
+              ports:
+                - "8888:8888"
+              volumes:
+                - ${HOME}/ai-workspace:/workspace
+                - ${HOME}/.jupyter:/root/.jupyter
+              environment:
+                - JUPYTER_ENABLE_LAB=yes
+                - NVIDIA_VISIBLE_DEVICES=all
+              command: >
+                bash -c "pip install jupyterlab ipywidgets matplotlib seaborn pandas scikit-learn &&
+                         jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root 
+                         --NotebookApp.token='' --NotebookApp.password=''"
+              runtime: nvidia
+
+            jupyter-tensorflow:
+              image: tensorflow/tensorflow:2.8.0-gpu-jupyter
+              container_name: ai-jupyter-tensorflow
+              restart: unless-stopped
+              ports:
+                - "8889:8888"
+              volumes:
+                - ${HOME}/ai-workspace:/tf/workspace
+                - ${HOME}/.jupyter:/root/.jupyter
+              environment:
+                - JUPYTER_ENABLE_LAB=yes
+                - NVIDIA_VISIBLE_DEVICES=all
+              command: >
+                bash -c "pip install jupyterlab matplotlib seaborn pandas scikit-learn &&
+                         jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root 
+                         --NotebookApp.token='' --NotebookApp.password=''"
+              runtime: nvidia
+
+            cuda-dev:
+              image: nvidia/cuda:11.4.3-devel-ubuntu20.04
+              container_name: ai-cuda-dev
+              restart: unless-stopped
+              ports:
+                - "8080:8080"
+              volumes:
+                - ${HOME}/ai-workspace:/workspace
+              environment:
+                - NVIDIA_VISIBLE_DEVICES=all
+              command: sleep infinity
+              runtime: nvidia
+
+            code-server:
+              image: codercom/code-server:latest
+              container_name: ai-code-server
+              restart: unless-stopped
+              ports:
+                - "8443:8080"
+              volumes:
+                - ${HOME}/ai-workspace:/home/coder/workspace
+                - ${HOME}/.config:/home/coder/.config
+              environment:
+                - PASSWORD=ai-development
+              command: --bind-addr 0.0.0.0:8080 /home/coder/workspace
+
+          volumes:
+            ai-workspace:
+              driver: local
+        dest: "{{ current_pwd.stdout }}/templates/docker-compose.ai-template.yml"
+        mode: '0644'
+      become: no
+      tags: [templates]
+
+    - name: Create CUDA Docker test script
+      copy:
+        content: |
+          #!/bin/bash
+          # Test CUDA functionality in Docker
+
+          echo "Testing CUDA Docker integration..."
+
+          # Test basic CUDA functionality
+          echo "1. Testing basic CUDA container..."
+          docker run --rm --gpus all nvidia/cuda:12.2-runtime-ubuntu22.04 nvidia-smi
+
+          echo -e "\n2. Testing PyTorch CUDA container..."
+          docker run --rm --gpus all pytorch/pytorch:latest python3 -c "
+          import torch
+          print(f'PyTorch version: {torch.__version__}')
+          print(f'CUDA available: {torch.cuda.is_available()}')
+          if torch.cuda.is_available():
+              print(f'GPU device: {torch.cuda.get_device_name(0)}')
+              print(f'GPU count: {torch.cuda.device_count()}')
+              print(f'CUDA version: {torch.version.cuda}')
+          else:
+              print('No CUDA devices detected')
+          "
+
+          echo -e "\nCUDA Docker test completed!"
+        dest: "{{ ansible_env.PWD }}/tests/test-cuda-docker.sh"
+        mode: '0755'
+      become: no
+      tags: [templates]
+
+  # ===============================================
+  # HANDLERS
+  # ===============================================
+  
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted

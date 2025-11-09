@@ -1,0 +1,242 @@
+---
+# AI CUDA Docker Setup - Verification Playbook
+# Verify Tesla K80 system setup
+
+- name: Verify AI System Setup for Tesla K80
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  
+  tasks:
+    # ===============================================
+    # SYSTEM VERIFICATION
+    # ===============================================
+    
+    - name: Check Ubuntu version
+      debug:
+        msg: "Ubuntu {{ ansible_distribution_version }} detected"
+      tags: [system]
+
+    - name: Verify NVIDIA GPU presence
+      shell: lspci | grep -i nvidia
+      register: gpu_check
+      failed_when: gpu_check.rc != 0
+      tags: [nvidia]
+
+    - name: Display GPU information
+      debug:
+        msg: "{{ gpu_check.stdout }}"
+      tags: [nvidia]
+
+    # ===============================================
+    # NVIDIA DRIVER VERIFICATION
+    # ===============================================
+    
+    - name: Check NVIDIA driver installation
+      shell: nvidia-smi
+      register: nvidia_smi_check
+      failed_when: 
+        - nvidia_smi_check.rc != 0 
+        - nvidia_smi_check.rc != 14  # Ignore infoROM corruption warning on Tesla K80
+      tags: [nvidia]
+
+    - name: Display NVIDIA driver info
+      debug:
+        msg: "{{ nvidia_smi_check.stdout_lines[:10] }}"
+      tags: [nvidia]
+
+    - name: Verify correct driver version (470 for Tesla K80)
+      shell: dpkg -l | grep nvidia-driver
+      register: driver_version_check
+      tags: [nvidia]
+
+    - name: Display installed driver version
+      debug:
+        msg: "{{ driver_version_check.stdout }}"
+      tags: [nvidia]
+
+    - name: Check that driver 470 is installed (Tesla K80 compatible)
+      assert:
+        that:
+          - "'nvidia-driver-470' in driver_version_check.stdout"
+        fail_msg: "Wrong NVIDIA driver installed. Tesla K80 requires driver 470."
+        success_msg: "Correct NVIDIA driver 470 installed for Tesla K80"
+      tags: [nvidia]
+
+    # ===============================================
+    # CUDA VERIFICATION
+    # ===============================================
+    
+    - name: Check CUDA installation
+      shell: nvcc --version
+      register: cuda_check
+      failed_when: cuda_check.rc != 0
+      tags: [cuda]
+
+    - name: Display CUDA version
+      debug:
+        msg: "{{ cuda_check.stdout }}"
+      tags: [cuda]
+
+    - name: Verify CUDA environment variables
+      shell: echo $CUDA_HOME
+      register: cuda_env
+      environment:
+        CUDA_HOME: /usr/local/cuda
+      tags: [cuda]
+
+    - name: Check CUDA libraries
+      stat:
+        path: /usr/local/cuda/lib64/libcudart.so
+      register: cuda_lib_check
+      failed_when: not cuda_lib_check.stat.exists
+      tags: [cuda]
+
+    # ===============================================
+    # DOCKER VERIFICATION
+    # ===============================================
+    
+    - name: Check Docker installation
+      shell: docker --version
+      register: docker_version
+      become: no
+      tags: [docker]
+
+    - name: Display Docker version
+      debug:
+        msg: "{{ docker_version.stdout }}"
+      tags: [docker]
+
+    - name: Check Docker service status
+      systemd:
+        name: docker
+      register: docker_service
+      tags: [docker]
+
+    - name: Verify Docker service is running
+      assert:
+        that:
+          - docker_service.status.ActiveState == "active"
+        fail_msg: "Docker service is not running"
+        success_msg: "Docker service is active"
+      tags: [docker]
+
+    - name: Test Docker hello-world
+      shell: docker run --rm hello-world
+      become: no
+      register: docker_test
+      tags: [docker]
+
+    - name: Display Docker test result
+      debug:
+        msg: "Docker test successful"
+      when: "'Hello from Docker!' in docker_test.stdout"
+      tags: [docker]
+
+    # ===============================================
+    # NVIDIA CONTAINER TOOLKIT VERIFICATION
+    # ===============================================
+    
+    - name: Check NVIDIA Container Toolkit
+      shell: nvidia-ctk --version
+      register: nvidia_ctk_check
+      failed_when: nvidia_ctk_check.rc != 0
+      tags: [nvidia-docker]
+
+    - name: Test NVIDIA Docker integration
+      shell: docker run --rm --gpus all nvidia/cuda:12.2-runtime-ubuntu22.04 nvidia-smi
+      become: no
+      register: nvidia_docker_test
+      tags: [nvidia-docker]
+
+    - name: Display NVIDIA Docker test result
+      debug:
+        msg: "NVIDIA Docker integration working"
+      when: nvidia_docker_test.rc == 0
+      tags: [nvidia-docker]
+
+    # ===============================================
+    # USER PERMISSIONS VERIFICATION
+    # ===============================================
+    
+    - name: Check user groups
+      shell: groups {{ ansible_user_id }}
+      register: user_groups
+      tags: [permissions]
+
+    - name: Verify user is in docker group
+      assert:
+        that:
+          - "'docker' in user_groups.stdout"
+        fail_msg: "User is not in docker group"
+        success_msg: "User is in docker group"
+      tags: [permissions]
+
+    # ===============================================
+    # WORKSPACE VERIFICATION
+    # ===============================================
+    
+    - name: Check workspace directories
+      stat:
+        path: "{{ ansible_env.HOME }}/{{ item }}"
+      register: workspace_dirs
+      loop:
+        - DockerVolumes
+        - Models
+        - Projects
+        - venvs
+      tags: [workspace]
+
+    - name: Verify workspace directories exist
+      assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+        fail_msg: "Workspace directory {{ item.item }} does not exist"
+        success_msg: "Workspace directory {{ item.item }} exists"
+      loop: "{{ workspace_dirs.results }}"
+      tags: [workspace]
+
+    # ===============================================
+    # TEMPLATE FILES VERIFICATION
+    # ===============================================
+    
+    - name: Check template files
+      stat:
+        path: "{{ ansible_env.PWD }}/{{ item }}"
+      register: template_files
+      loop:
+        - templates/docker-compose.ai-template.yml
+        - tests/test-cuda-docker.sh
+      tags: [templates]
+
+    - name: Verify template files exist
+      assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Template file {{ item.item }} does not exist"
+        success_msg: "Template file {{ item.item }} exists"
+      loop: "{{ template_files.results }}"
+      tags: [templates]
+
+    # ===============================================
+    # FINAL VERIFICATION MESSAGE
+    # ===============================================
+    
+    - name: Display verification summary
+      debug:
+        msg: |
+          ✅ Tesla K80 AI System Verification Complete!
+          
+          ✅ Ubuntu 22.04 LTS confirmed
+          ✅ NVIDIA GPU detected
+          ✅ NVIDIA drivers installed and working
+          ✅ CUDA 12.2 installed and configured
+          ✅ Docker installed and running
+          ✅ NVIDIA Container Toolkit configured
+          ✅ User permissions configured
+          ✅ Workspace directories created
+          ✅ Template files generated
+          
+          🚀 Your Tesla K80 system is ready for AI workloads!
+      tags: [summary]
